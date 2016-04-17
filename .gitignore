@@ -1,0 +1,8 @@
+# ignore data files
+streaming/target/
+streaming/project/
+streaming/metastore_db/
+static/project/
+static/target/
+static/metastore_db/
+
