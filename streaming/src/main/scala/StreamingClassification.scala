@@ -52,15 +52,15 @@ object StreamingClassification {
 		val sparkConf = new SparkConf().setAppName("DirectKafkaWordCount")
 		val ssc = new StreamingContext(sparkConf, Seconds(2))
 		// Create direct kafka stream with brokers and topics
-		val topicsSet = Set("streamtest")
-		val kafkaParams = Map[String, String]("metadata.broker.list" -> "localhost:9092")
+		val topicsSet = Array("MyTopic").toSet
+		val kafkaParams = Map[String, String]("zookeeper.connect" -> "192.168.0.101:2181", "metadata.broker.list" -> "192.168.0.101:9092")
 		val messages = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
 			ssc, kafkaParams, topicsSet)
 
 
         
-        /*
         
+        /*
         val customSchema = StructType(Array(
 			StructField("sex", IntegerType, true),
 			StructField("age", IntegerType, true),
@@ -87,14 +87,13 @@ object StreamingClassification {
 			StructField("G1", IntegerType, true),
 			StructField("G2", IntegerType, true),
 			StructField("G3", DoubleType, true)))
-			* 
-			* */
-
+		*/
 			
 			
 		
-		    // Get the lines, split them into words, count the words and print
+		// Get the lines, split them into words, count the words and print
 		val lines = messages.map(_._2)
+
 		val s = lines.map{ k => 
 			val arr = k.split(",")
 			new Student(arr(0).toInt, arr(1).toInt, arr(2).toInt, arr(3).toInt, arr(4).toInt, arr(5).toInt,
@@ -106,9 +105,8 @@ object StreamingClassification {
 		s.foreachRDD{ k =>
 			k.foreach{s => s.printPassed()}
 		}
-		
 
-    // Start the computation
+		// Start the computation
 		ssc.start()
 		ssc.awaitTermination()
 
