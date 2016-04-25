@@ -2,7 +2,9 @@
 streaming/target/
 streaming/project/
 streaming/metastore_db/
+streaming/data/
 static/project/
 static/target/
 static/metastore_db/
+static/data/
 
