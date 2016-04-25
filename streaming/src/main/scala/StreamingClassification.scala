@@ -7,6 +7,15 @@ import org.apache.spark.streaming.kafka.KafkaUtils
 import org.apache.spark.streaming.kafka._
 import org.apache.spark.SparkConf
 
+import org.apache.spark.mllib.linalg.Vectors
+import org.apache.spark.mllib.regression.LabeledPoint
+import org.apache.spark.mllib.regression.StreamingLinearRegressionWithSGD
+
+import org.apache.spark.mllib.feature.Normalizer
+import org.apache.spark.streaming.dstream.InputDStream
+import org.apache.spark.streaming.dstream.DStream
+
+
 
 
 	
@@ -45,6 +54,34 @@ object StreamingClassification {
 		}
 		
 	}
+	
+	def parse(stream : InputDStream[scala.Tuple2[String,String]], numFeatures : Int, label : Boolean, normalizer : Normalizer = null) : DStream[LabeledPoint] = {
+		var filterval = 0
+		if(label == true)
+			filterval = numFeatures + 1
+		else
+			filterval = numFeatures
+		
+		stream.map(_._2).map{ l =>
+			l.split(" +")
+		}.filter{ arr =>
+			arr.length == filterval			
+		}.map { arr =>
+			val label = arr(0).toDouble
+			val t = arr.slice(1, arr.length).map{ v=>
+				(v.split(':'))
+			}
+			val indices = t.map{v => v(0).toInt}
+			val values = t.map{v => v(1).toDouble}
+			if (normalizer != null)
+				LabeledPoint(label, normalizer.transform(Vectors.dense(values)))
+			else
+				LabeledPoint(label, Vectors.dense(values))
+		}
+	}
+	
+	
+	
 
     def main(args: Array[String]) {
 		Logger.getLogger("org").setLevel(Level.OFF);
@@ -52,12 +89,17 @@ object StreamingClassification {
 		val sparkConf = new SparkConf().setAppName("DirectKafkaWordCount")
 		val ssc = new StreamingContext(sparkConf, Seconds(2))
 		// Create direct kafka stream with brokers and topics
-		val topicsSet = Array("MyTopic").toSet
+		val trainset = Set("labeled")
+		val testset = Set("unlabeled")
 		val kafkaParams = Map[String, String]("zookeeper.connect" -> "192.168.0.101:2181", "metadata.broker.list" -> "192.168.0.101:9092")
-		val messages = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
-			ssc, kafkaParams, topicsSet)
+		val trainstream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
+			ssc, kafkaParams, trainset)
+		val teststream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
+			ssc, kafkaParams, testset)
 
-
+		val normalizer = new Normalizer()
+		
+		val numFeatures = 9
         
         
         /*
@@ -89,22 +131,36 @@ object StreamingClassification {
 			StructField("G3", DoubleType, true)))
 		*/
 			
-			
 		
-		// Get the lines, split them into words, count the words and print
-		val lines = messages.map(_._2)
-
-		val s = lines.map{ k => 
-			val arr = k.split(",")
-			new Student(arr(0).toInt, arr(1).toInt, arr(2).toInt, arr(3).toInt, arr(4).toInt, arr(5).toInt,
-					arr(6).toInt, arr(7).toInt, arr(8).toInt, arr(9).toInt, arr(10).toInt,
-					arr(11).toInt, arr(12).toInt, arr(13).toInt, arr(14).toInt, arr(15).toInt,
-					arr(16).toInt, arr(17).toInt, arr(18).toInt, arr(19).toInt, arr(20).toInt,
-					arr(21).toInt, arr(22).toInt, arr(23).toInt, arr(24).toDouble)
-		}
-		s.foreachRDD{ k =>
-			k.foreach{s => s.printPassed()}
-		}
+		
+		
+		val lines = parse(trainstream, numFeatures, true, normalizer).cache()		
+		
+		
+		val model = new StreamingLinearRegressionWithSGD()
+			.setInitialWeights(Vectors.zeros(numFeatures))
+			.setNumIterations(200)
+			.setStepSize(1)
+		model.trainOn(lines)
+		
+		
+		
+		val test = parse(teststream, numFeatures, true, normalizer)
+		
+		
+		
+		val predictions = model.predictOnValues(test.map(lp => (lp.label, lp.features)))
+		
+		predictions.print()
+		
+		
+		
+		/*
+		 * TODO
+		 * Write confidently labeled tuples to a parquet file
+		 * Write unconfident tuples to somewhere else
+		 * 
+		 */
 
 		// Start the computation
 		ssc.start()
