@@ -149,7 +149,7 @@ object StreamingClassification {
 	
 			// Convert RDD[String] to DataFrame
 			val df = rdd.toDF()
-			df.write.mode("append").json("/home/mitchell/Documents/UMD/CMSC724/Project/Active-Learning-DB/streaming/data/json/confident.json")
+			df.write.mode("append").json("./data/json/confident.json")
 		}
 		
 		
