@@ -3,7 +3,7 @@
 ## Static
 This is the version of things that executes in a standalone, non streaming environment. 
 
-Should be plug and play assuming that your `$SPARK_HOME` environment variable is set properly. 
+Should be plug and play assuming that your `$SPARKHOME` environment variable is set properly. 
 Just clone it, then do the following
 ```
 cd ./static 
