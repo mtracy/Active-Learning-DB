@@ -1,6 +1,7 @@
 # ignore data files
 streaming/target/
-streaming/project/
+streaming/project/project/
+streaming/project/target/
 streaming/metastore_db/
 streaming/data/
 static/project/
