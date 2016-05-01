@@ -94,7 +94,7 @@ object StreamingClassification {
 		// Create direct kafka stream with brokers and topics
 		val trainset = Set("labeled")
 		val testset = Set("unlabeled")
-		val kafkaParams = Map[String, String]("zookeeper.connect" -> "192.168.0.102:2181", "metadata.broker.list" -> "192.168.0.101:9092", "group.id" -> "workers")
+		val kafkaParams = Map[String, String]("zookeeper.connect" -> "192.168.0.102:2181", "metadata.broker.list" -> "192.168.0.102:9092", "group.id" -> "workers")
 		val trainstream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
 			ssc, kafkaParams, trainset)
 		val teststream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
