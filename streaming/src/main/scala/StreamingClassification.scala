@@ -56,14 +56,14 @@ object StreamingClassification {
 		
 	}
 	
-	def parse(stream : InputDStream[scala.Tuple2[String,String]], numFeatures : Int, label : Boolean, normalizer : Normalizer = null) : DStream[LabeledPoint] = {
+	def parse(stream : DStream[String], numFeatures : Int, label : Boolean, normalizer : Normalizer = null) : DStream[LabeledPoint] = {
 		var filterval = 0
 		if(label == true)
 			filterval = numFeatures + 1
 		else
 			filterval = numFeatures
 		
-		stream.map(_._2).map{ l =>
+		stream.map{ l =>
 			l.split(" +")
 		}.filter{ arr =>
 			arr.length == filterval			
@@ -96,38 +96,29 @@ object StreamingClassification {
 		val testset = Set("unlabeled")
 		val kafkaParams = Map[String, String]("zookeeper.connect" -> "192.168.0.102:2181", "metadata.broker.list" -> "192.168.0.102:9092", "group.id" -> "workers")
 		val trainstream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
-			ssc, kafkaParams, trainset)
+			ssc, kafkaParams, trainset).map(_._2)
 		val teststream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
-			ssc, kafkaParams, testset)
+			ssc, kafkaParams, testset).map(_._2)
 
 		val normalizer = new Normalizer()
 		
 		val numFeatures = 9
-		
+		val label = true
 		val labels = Array(0.0, 1.0)
 		val confidenceBound = .25
-		
-        
-        
-
-			
-		
-		
-		
-		val lines = parse(trainstream, numFeatures, true, normalizer).cache()		
-		
-		
 		val model = new StreamingLinearRegressionWithSGD()
-			.setInitialWeights(Vectors.zeros(numFeatures))
-			.setNumIterations(200)
-			.setStepSize(1)
-		model.trainOn(lines)
-		
-		
-		
-		val test = parse(teststream, numFeatures, true, normalizer)
-		
-		
+				.setInitialWeights(Vectors.zeros(numFeatures))
+				.setNumIterations(200)
+				.setStepSize(1)
+        
+        
+        
+        val lines = parse(trainstream, numFeatures, label, normalizer)  
+        model.trainOn(lines)
+			
+		val test = parse(teststream, numFeatures, label, normalizer)
+			
+			
 		
 		val predictions = model.predictOnValues(test.map(lp => (lp.features, lp.features)))
 		
@@ -152,23 +143,14 @@ object StreamingClassification {
 			df.write.mode("append").json("./data/json/confident.json")
 		}
 		
-		
-		/*confident.foreachRDD{r=>
-			r.foreach{k=> println(k.mkString(" "))}
-		}*/
+			
+			
 		
 		
 		
 		
 		
-		/*
-		 * TODO
-		 * Write confidently labeled tuples to a file
-		 * Write unconfident tuples to somewhere else
-		 * 
-		 */
 
-		// Start the computation
 		ssc.start()
 		ssc.awaitTermination()
 
