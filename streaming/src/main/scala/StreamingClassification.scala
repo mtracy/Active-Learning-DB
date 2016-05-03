@@ -91,15 +91,22 @@ object StreamingClassification {
 		val sparkConf = new SparkConf().setAppName("DirectKafkaWordCount")
 		val ssc = new StreamingContext(sparkConf, Seconds(2))
 		
-		// Create direct kafka stream with brokers and topics
-		val trainset = Set("labeled")
-		val testset = Set("unlabeled")
-		val kafkaParams = Map[String, String]("zookeeper.connect" -> "192.168.0.102:2181", "metadata.broker.list" -> "192.168.0.102:9092", "group.id" -> "workers")
-		val trainstream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
-			ssc, kafkaParams, trainset).map(_._2)
-		val teststream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
-			ssc, kafkaParams, testset).map(_._2)
+		
+		
+		val zkQuorum = "192.168.0.102:2181"
+		val group = "test-group"
+		val numThreads = "1"
+		
+		val traintopics = "train"
+		val testtopics = "test"
+		
+		val trainMap = traintopics.split(",").map((_, numThreads.toInt)).toMap
+		val train = KafkaUtils.createStream(ssc, zkQuorum, group, trainMap).map(_._2)
 
+		val testMap = testtopics.split(",").map((_, numThreads.toInt)).toMap
+		val test = KafkaUtils.createStream(ssc, zkQuorum, group, testMap).map(_._2)
+
+		
 		val normalizer = new Normalizer()
 		
 		val numFeatures = 9
@@ -111,16 +118,18 @@ object StreamingClassification {
 				.setNumIterations(200)
 				.setStepSize(1)
         
-        
-        
-        val lines = parse(trainstream, numFeatures, label, normalizer)  
-        model.trainOn(lines)
-			
-		val test = parse(teststream, numFeatures, label, normalizer)
-			
+
+	
+		
+
+	       
+        val trainLines = parse(train, numFeatures, label, normalizer)  
+        model.trainOn(trainLines)
 			
 		
-		val predictions = model.predictOnValues(test.map(lp => (lp.features, lp.features)))
+		val testLines = parse(test, numFeatures, label, normalizer)
+				
+		val predictions = model.predictOnValues(testLines.map(lp => (lp.features, lp.features)))
 		
 		
 		val confident = predictions.filter{ k=>
@@ -143,14 +152,6 @@ object StreamingClassification {
 			df.write.mode("append").json("./data/json/confident.json")
 		}
 		
-			
-			
-		
-		
-		
-		
-		
-
 		ssc.start()
 		ssc.awaitTermination()
 
