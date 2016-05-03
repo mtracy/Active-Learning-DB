@@ -9,6 +9,7 @@ import org.apache.spark.SparkConf
 
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
+import org.apache.spark.mllib.regression.LinearRegressionModel
 import org.apache.spark.mllib.regression.StreamingLinearRegressionWithSGD
 
 import org.apache.spark.mllib.feature.Normalizer
@@ -16,6 +17,11 @@ import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.dstream.DStream
 
 import org.apache.spark.sql.SQLContext
+
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
+
+import java.util.HashMap
+
 
 
 
@@ -102,12 +108,13 @@ object StreamingClassification {
 		//Configurable Settings//
 		/////////////////////////
 		val zkQuorum = "192.168.0.102:2181"
+		val kafkaBroker = "192.168.0.102:9092"
 		val group = "test-group"
 		val numThreads = "1"
 		
 		val traintopics = "train"
 		val testtopics = "test"
-		
+		val weighttopic = "weights"
 		
 		val normalizer = new Normalizer()
 		
@@ -117,6 +124,7 @@ object StreamingClassification {
 		val confidenceBound = .25
 		val numIterations = 200
 		val stepSize = 1
+		val updateDelay = 50
 		
 		val confidentPath = "./data/json/confident.json"
 		val unconfidentPath = "./data/json/unconfident.json"
@@ -127,7 +135,15 @@ object StreamingClassification {
 
 		val testMap = testtopics.split(",").map((_, numThreads.toInt)).toMap
 		val test = KafkaUtils.createStream(ssc, zkQuorum, group, testMap).map(_._2)
-
+		
+		val props = new HashMap[String, Object]()
+				props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaBroker)
+				props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+				"org.apache.kafka.common.serialization.StringSerializer")
+				props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+				"org.apache.kafka.common.serialization.StringSerializer")
+			
+		val producer = new KafkaProducer[String, String](props)
 		
 		
 		val model = new StreamingLinearRegressionWithSGD()
@@ -135,13 +151,11 @@ object StreamingClassification {
 				.setNumIterations(numIterations)
 				.setStepSize(stepSize)
         
-
+		var trainingCount: Double = 0.0
 	
-		
-
-	       
-        val trainLines = parse(train, numFeatures, label, normalizer)  
+	    val trainLines = parse(train, numFeatures, label, normalizer)  
         model.trainOn(trainLines)
+        
 			
 		
 		val testLines = parse(test, numFeatures, label, normalizer)	
@@ -193,6 +207,22 @@ object StreamingClassification {
 		}
 		
 		
+		trainLines.foreachRDD{r=>
+			
+			trainingCount = trainingCount + r.count()
+			if(trainingCount >= updateDelay) { 
+				
+				trainingCount = 0
+				
+		
+				val weights = model.latestModel().weights.toString()
+				
+				val message = new ProducerRecord[String, String](weighttopic, null, weights)
+				
+				producer.send(message)
+			}
+		
+		}
 		
 		ssc.start()
 		ssc.awaitTermination()
