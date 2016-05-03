@@ -56,6 +56,11 @@ object StreamingClassification {
 		
 	}
 	
+	
+	//Takes in a DStream of lines in LIBSVM format and converts it into a DStream of LabeledPoints
+	//Takes the number of features expected to parse out bad lines
+	//Additionally, takes a parameter that indicates if a label is present in the line (as would be the case in training data
+	//Lastly, there is an optional normalizer argument that will normalize the feature vector if present (highly recommended)
 	def parse(stream : DStream[String], numFeatures : Int, label : Boolean, normalizer : Normalizer = null) : DStream[LabeledPoint] = {
 		var filterval = 0
 		if(label == true)
@@ -81,24 +86,41 @@ object StreamingClassification {
 		}
 	}
 	
-	
+	//This is the feature vector that is used in testing. It assumes there
+	//are 9 features that are ambiguously named. The format of the object
+	//to be classified could be made configurable.
 	case class Tuple(two: Double, three: Double, four: Double, five: Double, six: Double, seven: Double, eight: Double, nine: Double, ten: Double, label: Double)
 
 
     def main(args: Array[String]) {
 		Logger.getLogger("org").setLevel(Level.OFF);
 		Logger.getLogger("akka").setLevel(Level.OFF);
-		val sparkConf = new SparkConf().setAppName("DirectKafkaWordCount")
+		val sparkConf = new SparkConf().setAppName("Active-Streams")
 		val ssc = new StreamingContext(sparkConf, Seconds(2))
 		
-		
-		
+		/////////////////////////
+		//Configurable Settings//
+		/////////////////////////
 		val zkQuorum = "192.168.0.102:2181"
 		val group = "test-group"
 		val numThreads = "1"
 		
 		val traintopics = "train"
 		val testtopics = "test"
+		
+		
+		val normalizer = new Normalizer()
+		
+		val numFeatures = 9
+		val label = true
+		val labels = Array(0.0, 1.0)
+		val confidenceBound = .25
+		val numIterations = 200
+		val stepSize = 1
+		
+		val confidentPath = "./data/json/confident.json"
+		val unconfidentPath = "./data/json/unconfident.json"
+		/////////////////////////
 		
 		val trainMap = traintopics.split(",").map((_, numThreads.toInt)).toMap
 		val train = KafkaUtils.createStream(ssc, zkQuorum, group, trainMap).map(_._2)
@@ -107,16 +129,11 @@ object StreamingClassification {
 		val test = KafkaUtils.createStream(ssc, zkQuorum, group, testMap).map(_._2)
 
 		
-		val normalizer = new Normalizer()
 		
-		val numFeatures = 9
-		val label = true
-		val labels = Array(0.0, 1.0)
-		val confidenceBound = .25
 		val model = new StreamingLinearRegressionWithSGD()
 				.setInitialWeights(Vectors.zeros(numFeatures))
-				.setNumIterations(200)
-				.setStepSize(1)
+				.setNumIterations(numIterations)
+				.setStepSize(stepSize)
         
 
 	
@@ -127,21 +144,44 @@ object StreamingClassification {
         model.trainOn(trainLines)
 			
 		
-		val testLines = parse(test, numFeatures, label, normalizer)
-				
+		val testLines = parse(test, numFeatures, label, normalizer)	
 		val predictions = model.predictOnValues(testLines.map(lp => (lp.features, lp.features)))
 		
 		
+		
+		//filters out the tuples that are not within the confidence bound of a valid label
+		//convert these confident tuples into Tuple objects
+		//write them to the confident location
 		val confident = predictions.filter{ k=>
 			val l = k._2
-			!(labels.map{ v=> math.abs(l-v)}.filter{v=> v < confidenceBound}.isEmpty)//mmm thats hot. scala you are sexy
+			!(labels.map{ v=> math.abs(l-v)}.filter{v=> v < confidenceBound}.isEmpty)
+		}.map { k=>
+			k._1.toArray :+ (math.floor(k._2+.5))
+		}.map(p => Tuple(p(0), p(1), p(2), p(3), p(4), p(5), p(6), p(7), p(8), p(9)))
+
+		confident.foreachRDD { rdd =>
+			// Get the singleton instance of SQLContext
+			val sqlContext = SQLContext.getOrCreate(rdd.sparkContext)
+			import sqlContext.implicits._
+	
+			// Convert RDD[String] to DataFrame
+			val df = rdd.toDF()
+			df.write.mode("append").json(confidentPath)
+		}
+		
+		
+		
+		//filters out the tuples that are within the confidence bound of a valid label
+		//convert these unconfident tuples into Tuple objects
+		//write them to the unconfident location
+		val unconfident = predictions.filter{ k=>
+			val l = k._2
+			(labels.map{ v=> math.abs(l-v)}.filter{v=> v < confidenceBound}.isEmpty)
 		}.map { k=>
 			k._1.toArray :+ (math.floor(k._2+.5))
 		}.map(p => Tuple(p(0), p(1), p(2), p(3), p(4), p(5), p(6), p(7), p(8), p(9)))
 		
-
-
-		confident.foreachRDD { rdd =>
+		unconfident.foreachRDD { rdd =>
 
 			// Get the singleton instance of SQLContext
 			val sqlContext = SQLContext.getOrCreate(rdd.sparkContext)
@@ -149,8 +189,10 @@ object StreamingClassification {
 	
 			// Convert RDD[String] to DataFrame
 			val df = rdd.toDF()
-			df.write.mode("append").json("./data/json/confident.json")
+			df.write.mode("append").json(unconfidentPath)
 		}
+		
+		
 		
 		ssc.start()
 		ssc.awaitTermination()
@@ -163,31 +205,3 @@ object StreamingClassification {
 
 
 
-        /* I'm tired of looking at this but I don't want to throw it away yet
-        val customSchema = StructType(Array(
-			StructField("sex", IntegerType, true),
-			StructField("age", IntegerType, true),
-			StructField("Medu", IntegerType, true),
-			StructField("Fedu", IntegerType, true),
-			StructField("traveltime", IntegerType, true),
-			StructField("studytime", IntegerType, true),
-			StructField("failures", IntegerType, true),
-			StructField("schoolsup", IntegerType, true),
-			StructField("famsup", IntegerType, true),
-			StructField("paid", IntegerType, true),
-			StructField("activities", IntegerType, true),
-			StructField("nursery", IntegerType, true),
-			StructField("higher", IntegerType, true),
-			StructField("internet", IntegerType, true),
-			StructField("romantic", IntegerType, true),
-			StructField("famrel", IntegerType, true),
-			StructField("freetime", IntegerType, true),
-			StructField("goout", IntegerType, true),
-			StructField("Dalc", IntegerType, true),
-			StructField("Walc", IntegerType, true),
-			StructField("health", IntegerType, true),
-			StructField("absences", IntegerType, true),
-			StructField("G1", IntegerType, true),
-			StructField("G2", IntegerType, true),
-			StructField("G3", DoubleType, true)))
-		*/
