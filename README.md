@@ -20,7 +20,21 @@ So then I had 1 terminal that ran the following
 ```
 ~/kafka/bin/zookeeper-server-start.sh ~/kafka/config/zookeeper.properties
 ```
-another terminal that ran
+
+If that command due to an error like `java.net.BindException: Address already in use`, it may be because you have an instance of zookeeper running already.
+You can check this by running 
+```
+service zookeeper status
+```
+
+If there is in fact another instance of zookeeper running, you can kill it with
+
+```
+sudo service zookeeper stop
+```
+Then you should be free to run the original command to start the kafka zookeeper.
+
+Once you have that, in another terminal that run
 ```
 ~/kafka/bin/kafka-server-start.sh ~/kafka/config/server.properties
 ```
